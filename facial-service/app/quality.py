@@ -23,29 +23,44 @@ class QualityResult:
 
 
 def estimate_pose(kps: object, frame_shape: tuple[int, ...]) -> Pose:
-    """Approximate head yaw/pitch from the 5 InsightFace keypoints.
-
-    Uses where the nose sits between the eyes and the mouth, normalized by the face size, so the
-    result does not depend on where the face is in the frame. (A solvePnP fit with a generic 3D
-    model reported about 20 degrees of yaw for a frontal face that was simply off center.)
-    Signs keep the previous convention: nose toward image right -> positive yaw, nose lower -> negative pitch.
-    """
     points = np.asarray(kps, dtype=np.float64)
     if points.shape != (5, 2):
         return Pose(0.0, 0.0)
     # InsightFace kps order: left eye, right eye, nose, left mouth, right mouth.
-    left_eye, right_eye, nose, left_mouth, right_mouth = points
-    eyes = (left_eye + right_eye) / 2
-    mouth = (left_mouth + right_mouth) / 2
-    eye_distance = float(np.linalg.norm(right_eye - left_eye))
-    face_height = float(mouth[1] - eyes[1])
-    if eye_distance < 1 or face_height < 1:
+    image_points = points[[2, 0, 1, 3, 4]]
+    model_points = np.array(
+        [
+            (0.0, 0.0, 0.0),
+            (-30.0, -30.0, -30.0),
+            (30.0, -30.0, -30.0),
+            (-25.0, 30.0, -25.0),
+            (25.0, 30.0, -25.0),
+        ],
+        dtype=np.float64,
+    )
+    height, width = frame_shape[:2]
+    focal = float(width)
+    camera_matrix = np.array(
+        [[focal, 0, width / 2], [0, focal, height / 2], [0, 0, 1]],
+        dtype=np.float64,
+    )
+    try:
+        success, rotation, _ = cv2.solvePnP(
+            model_points,
+            image_points,
+            camera_matrix,
+            np.zeros((4, 1)),
+            flags=cv2.SOLVEPNP_EPNP,
+        )
+        if not success:
+            return Pose(0.0, 0.0)
+        matrix, _ = cv2.Rodrigues(rotation)
+        sy = math.sqrt(matrix[0, 0] ** 2 + matrix[1, 0] ** 2)
+        yaw = math.degrees(math.atan2(-matrix[2, 0], sy))
+        pitch = math.degrees(math.atan2(matrix[2, 1], matrix[2, 2]))
+        return Pose(float(yaw), float(pitch))
+    except cv2.error:
         return Pose(0.0, 0.0)
-    horizontal = (nose[0] - (eyes[0] + mouth[0]) / 2) / eye_distance
-    vertical = (nose[1] - eyes[1]) / face_height - 0.495  # 0.495: nose position in the frontal ArcFace template
-    yaw = math.degrees(math.atan2(horizontal, 0.45))
-    pitch = -math.degrees(math.atan2(vertical, 0.45))
-    return Pose(float(yaw), float(pitch))
 
 
 def evaluate_face(frame: np.ndarray, face: object, configuration: object) -> QualityResult:
@@ -63,10 +78,7 @@ def evaluate_face(frame: np.ndarray, face: object, configuration: object) -> Qua
         return QualityResult(False, 0.0, "No se pudo analizar el rostro.", Pose(0, 0), "front")
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     brightness = float(np.mean(gray))
-    # Measure sharpness at the recognition model's scale (112 px tall); on the full-size crop a
-    # close face from a 720p webcam always looked "blurry" because each pixel changes very little.
-    sample = cv2.resize(gray, (max(1, round(gray.shape[1] * 112 / gray.shape[0])), 112), interpolation=cv2.INTER_AREA)
-    blur = float(cv2.Laplacian(sample, cv2.CV_64F).var())
+    blur = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     det_score = float(getattr(face, "det_score", 0.0))
     pose = estimate_pose(getattr(face, "kps", []), frame.shape)
     if det_score < 0.5:

@@ -1,0 +1,17 @@
+# Supported Python: 3.11 and 3.12.
+# CPU ONNX Runtime is intentional: no GPU is required.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# The setup scripts remove the transitive opencv-python-headless package pulled
+# by albumentations and restore this GUI-enabled wheel after dependency resolution.
+opencv-python==4.10.0.84
+numpy==1.26.4
+insightface==0.7.3
+# 1.19.2 provides a macOS universal2 wheel for Intel and Apple Silicon.
+onnxruntime==1.19.2 ; platform_system == "Darwin"
+onnxruntime==1.20.1 ; platform_system != "Darwin"
+pyodbc==5.2.0
+pydantic==2.10.5
+python-dotenv==1.0.1
+cryptography==44.0.0
+pytest==8.3.4

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(SERVICE_ROOT / ".env")
+load_dotenv(SERVICE_ROOT / ".env", interpolate=False)
 
 
 def _int(name: str, default: int) -> int:
@@ -43,7 +43,7 @@ def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 def _local_host() -> str:
     value = os.getenv("FACIAL_HOST", "127.0.0.1").strip()
-    if value in {"0.0.0.0", "::", "[::]"}:
+    if value not in {"127.0.0.1", "localhost", ""}:
         raise ValueError("FACIAL_HOST debe ser local; no se permite exponer el servicio en todas las interfaces.")
     return value or "127.0.0.1"
 
@@ -65,8 +65,6 @@ class Settings:
     camera_width: int
     camera_height: int
     show_preview: bool
-    camera_guide: bool
-    facial_mode: str
     face_model: str
     face_match_threshold: float
     face_min_size: int
@@ -96,23 +94,21 @@ class Settings:
             db_driver=os.getenv("DB_DRIVER", "ODBC Driver 18 for SQL Server"),
             db_encrypt=_bool("DB_ENCRYPT", True),
             db_trust_server_certificate=_bool("DB_TRUST_SERVER_CERTIFICATE", True),
-            facial_host=_local_host(),
-            facial_port=_int("FACIAL_PORT", 8765),
-            camera_index=_optional_int("CAMERA_INDEX"),
-            camera_name_hint=os.getenv("CAMERA_NAME_HINT", "").strip(),
-            camera_width=_int("CAMERA_WIDTH", 1280),
-            camera_height=_int("CAMERA_HEIGHT", 720),
+                        facial_host=_local_host(),
+                        facial_port=_int("FACIAL_PORT", 8765),
+                        camera_index=_optional_int("CAMERA_INDEX"),
+                        camera_name_hint=os.getenv("CAMERA_NAME_HINT", "").strip(),
+                        camera_width=_int("CAMERA_WIDTH", 1280),
+                        camera_height=_int("CAMERA_HEIGHT", 720),
             show_preview=_bool("SHOW_PREVIEW", True),
-            camera_guide=_bool("CAMERA_GUIDE", True),
-            facial_mode=os.getenv("FACIAL_MODE", "completo").strip().lower(),
             face_model=os.getenv("FACE_MODEL", "buffalo_l"),
             face_match_threshold=_float("FACE_MATCH_THRESHOLD", 0.55),
             face_min_size=_int("FACE_MIN_SIZE", 120),
-            blur_threshold=_float("BLUR_THRESHOLD", 40),
-            brightness_min=_float("BRIGHTNESS_MIN", 30),
+            blur_threshold=_float("BLUR_THRESHOLD", 80),
+            brightness_min=_float("BRIGHTNESS_MIN", 45),
             brightness_max=_float("BRIGHTNESS_MAX", 220),
             max_yaw=_float("MAX_YAW", 28),
-            max_pitch=_float("MAX_PITCH", 25),
+            max_pitch=_float("MAX_PITCH", 22),
             enroll_sample_count=_int("ENROLL_SAMPLE_COUNT", 20),
             verify_sample_count=_int("VERIFY_SAMPLE_COUNT", 7),
             enroll_timeout_seconds=_int("ENROLL_TIMEOUT_SECONDS", 60),
@@ -131,8 +127,8 @@ class Settings:
         return (
             f"DRIVER={{{self.db_driver}}};"
             f"SERVER={self.db_host},{self.db_port};"
-            f"DATABASE={self.db_name};"
-            f"UID={self.db_user};PWD={self.db_password};"
+            f"DATABASE={{{self.db_name.replace(chr(125), chr(125)*2)}}};"
+            f"UID={{{self.db_user.replace(chr(125), chr(125)*2)}}};PWD={{{self.db_password.replace(chr(125), chr(125)*2)}}};"
             f"Encrypt={encrypt};TrustServerCertificate={trust};"
         )
 

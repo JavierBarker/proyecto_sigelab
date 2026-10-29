@@ -1,0 +1,5 @@
+Maven clean package ejecutado con Microsoft OpenJDK 21.0.13.0.2.
+15 pruebas Java aprobadas; 1 prueba SQL omitida.
+Bytecode Launcher.class major version 65 (Java 21).
+Las 18 pruebas Python de la entrega previa se conservan; Python no fue modificado.
+SQL Server, Docker, Windows GUI y cámara reales pendientes de validación en la laptop.

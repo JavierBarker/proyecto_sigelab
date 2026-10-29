@@ -37,8 +37,7 @@ class LivenessSession:
     def observe(self, face: object, yaw: float, pitch: float) -> bool:
         if self.completed:
             return True
-        # Pitch is looser than yaw: a laptop camera below eye level makes a frontal face look slightly down.
-        if abs(yaw) <= min(10.0, self.max_yaw * 0.45) and abs(pitch) <= self.max_pitch * 0.7:
+        if abs(yaw) <= min(10.0, self.max_yaw * 0.45) and abs(pitch) <= min(10.0, self.max_pitch * 0.45):
             self.neutral_frames = min(3, self.neutral_frames + 1)
         if self.neutral_frames < 3:
             return False

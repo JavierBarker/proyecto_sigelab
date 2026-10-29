@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 import math
 import time
@@ -21,18 +20,11 @@ from .errors import (
     PreviewUnavailableError,
 )
 from .liveness import LivenessSession
-from .preview import CameraGuide, FaceOverlay, PreviewWindow, guide_target
+from .preview import FaceOverlay, PreviewWindow
 from .quality import QualityResult, evaluate_face
 
 
 logger = logging.getLogger(__name__)
-
-
-RESULT_MESSAGES = {
-    "IDENTIDAD VERIFICADA": "Reconocimos su rostro correctamente.",
-    "ROSTRO REGISTRADO CORRECTAMENTE": "Registramos su rostro correctamente.",
-    "ROSTRO NO RECONOCIDO": "No reconocimos su rostro.",
-}
 
 
 @dataclass(frozen=True)
@@ -113,21 +105,13 @@ class FaceEngine:
             raise ValueError("El modelo no devolvió un embedding facial.")
         return normalize(np.asarray(value, dtype=np.float32))
 
-    @property
-    def simple_mode(self) -> bool:
-        """FACIAL_MODE=simple: enrollment only from the front and no head-turn liveness challenge."""
-        return self.settings.facial_mode == "simple"
-
     def capture_enrollment(self, user_label: str = "Usuario") -> CaptureResult:
-        if self.simple_mode:
-            phases = (EnrollmentPhase("FRENTE", "MIRE AL FRENTE", "front", 10, "TIMEOUT_FRONT"),)
-        else:
-            phases = (
-                EnrollmentPhase("FRENTE", "MIRE AL FRENTE", "front", 6, "TIMEOUT_FRONT"),
-                EnrollmentPhase("IZQUIERDA", "GIRE LIGERAMENTE A LA IZQUIERDA", "left", 5, "TIMEOUT_LEFT"),
-                EnrollmentPhase("DERECHA", "GIRE LIGERAMENTE A LA DERECHA", "right", 5, "TIMEOUT_RIGHT"),
-                EnrollmentPhase("FRENTE FINAL", "MIRE AL FRENTE NUEVAMENTE", "front", 4, "TIMEOUT_FRONT"),
-            )
+        phases = (
+            EnrollmentPhase("FRENTE", "MIRE AL FRENTE", "front", 6, "TIMEOUT_FRONT"),
+            EnrollmentPhase("IZQUIERDA", "GIRE LIGERAMENTE A LA IZQUIERDA", "left", 5, "TIMEOUT_LEFT"),
+            EnrollmentPhase("DERECHA", "GIRE LIGERAMENTE A LA DERECHA", "right", 5, "TIMEOUT_RIGHT"),
+            EnrollmentPhase("FRENTE FINAL", "MIRE AL FRENTE NUEVAMENTE", "front", 4, "TIMEOUT_FRONT"),
+        )
         logger.info("Enrollment phase=FRONT user_id_label=%s", user_label)
         return self._capture(
             sample_count=self.settings.enroll_sample_count,
@@ -203,21 +187,17 @@ class FaceEngine:
                     elif len(faces) > 1:
                         action = "SOLO DEBE APARECER UNA PERSONA"
                         quality_text = "INVÁLIDA: MÚLTIPLES ROSTROS"
-                    elif self.settings.camera_guide and (fit := self._position_fit(frame.shape, face)):
-                        action = fit
-                        quality_text = "FUERA DE POSICIÓN"
                     else:
                         quality = evaluate_face(frame, face, self.settings)
                         quality_text = self._quality_text(quality)
                         phase_ok, pose_message = self._phase_match(quality, current_phase.target)
                         action = pose_message
-                        if liveness is None and quality.accepted and not self.simple_mode:
+                        if liveness is None and quality.accepted:
                             # Stable turn challenges are easier to understand and test than blink.
                             liveness = LivenessSession(self.settings.max_yaw, self.settings.max_pitch, False)
-                        if quality.accepted:
-                            if liveness is not None:
-                                liveness.observe(face, quality.pose.yaw, quality.pose.pitch)
-                            if liveness is not None and not liveness.completed:
+                        if liveness is not None and quality.accepted:
+                            liveness.observe(face, quality.pose.yaw, quality.pose.pitch)
+                            if not liveness.completed:
                                 action = self._liveness_action(liveness)
                             elif phase_ok and time.monotonic() - last_sample >= self.settings.sample_interval_seconds:
                                 if phase_counts[phase_index] < current_phase.samples:
@@ -245,10 +225,7 @@ class FaceEngine:
                         liveness,
                         quality,
                     )
-                    guide = self._guide(
-                        title, user_label, faces, quality, action, phase_ok, liveness, current_phase, phase_counts, phases
-                    )
-                    key = window.show(frame, overlays, lines, guide)
+                    key = window.show(frame, overlays, lines)
                     if key == 27:
                         raise CaptureCancelledError()
 
@@ -256,10 +233,7 @@ class FaceEngine:
                         completed_lines = lines[:]
                         completed_lines[3] = f"ACCIÓN: {current_phase.action}"
                         completed_lines.append("✓ FASE COMPLETADA")
-                        done_guide = None
-                        if guide is not None:
-                            done_guide = dataclasses.replace(guide, message="¡Bien! Paso completado", state="done")
-                        key = window.show(frame, overlays, completed_lines, done_guide)
+                        key = window.show(frame, overlays, completed_lines)
                         if key == 27:
                             raise CaptureCancelledError()
                         time.sleep(0.7)
@@ -301,13 +275,12 @@ class FaceEngine:
                     f"COMENZANDO... {remaining}",
                     "ESC - CANCELAR",
                 ],
-                self._simple_guide(title, "Coloque su rostro dentro del círculo", "idle", f"Comenzando... {remaining}", user_label),
             )
             if key == 27:
                 raise CaptureCancelledError()
 
+    @staticmethod
     def _show_failure(
-        self,
         window: PreviewWindow,
         frame: np.ndarray | None,
         title: str,
@@ -322,7 +295,6 @@ class FaceEngine:
                 frame,
                 [],
                 [title.upper(), f"Usuario: {user_label}", "CAPTURA NO COMPLETADA", message.upper(), "ESC - CERRAR"],
-                self._simple_guide(title, message, "error", "Intente de nuevo.", user_label),
             )
             if key == 27:
                 break
@@ -418,67 +390,6 @@ class FaceEngine:
             lines.insert(5, f"Yaw: {quality.pose.yaw:.1f}  Pitch: {quality.pose.pitch:.1f}")
         return lines
 
-    def _simple_guide(
-        self, title: str, message: str, state: str, detail: str = "", user: str = ""
-    ) -> CameraGuide | None:
-        if not self.settings.camera_guide:
-            return None
-        return CameraGuide(title, message, state, 0.0, detail, user=user)
-
-    @staticmethod
-    def _position_fit(shape: tuple[int, ...], face: object) -> str | None:
-        """Message when the face is off center or at the wrong distance; None when it fits."""
-        bbox = np.asarray(getattr(face, "bbox", []), dtype=float)
-        if bbox.size != 4:
-            return None
-        x1, y1, x2, y2 = bbox.tolist()
-        cx, cy, radius = guide_target(shape)
-        face_x, face_y = (x1 + x2) / 2, (y1 + y2) / 2
-        if math.hypot(face_x - cx, face_y - cy) > radius * 0.5:
-            return "CENTRE SU ROSTRO EN EL CÍRCULO"
-        width = x2 - x1
-        if width < radius * 0.6:
-            return "ACÉRQUESE UN POCO A LA CÁMARA"
-        if width > radius * 1.8:
-            return "ALÉJESE UN POCO DE LA CÁMARA"
-        return None
-
-    def _guide(
-        self,
-        title: str,
-        user_label: str,
-        faces: list[object],
-        quality: QualityResult | None,
-        action: str,
-        phase_ok: bool,
-        liveness: LivenessSession | None,
-        phase: EnrollmentPhase,
-        phase_counts: list[int],
-        phases: tuple[EnrollmentPhase, ...],
-    ) -> CameraGuide | None:
-        if not self.settings.camera_guide:
-            return None
-        total = sum(item.samples for item in phases)
-        progress = sum(phase_counts) / total if total else 0.0
-        index = phases.index(phase)
-        if len(phases) > 1:
-            detail = f"Paso {index + 1} de {len(phases)}"
-        else:
-            detail = "Registro de rostro" if "Registro" in title else "Verificación de identidad"
-        debug = f"Yaw {quality.pose.yaw:.1f}  Pitch {quality.pose.pitch:.1f}" if self.settings.facial_debug and quality else ""
-        if not faces:
-            return CameraGuide(title, "Coloque su rostro dentro del círculo", "idle", progress, detail, debug, user_label)
-        if len(faces) > 1:
-            return CameraGuide(
-                title, "Solo debe aparecer una persona", "error", progress, detail, debug, user_label
-            )
-        capturing = phase_ok and (liveness.completed if liveness is not None else self.simple_mode)
-        if capturing and phase.target == "front":
-            message = "Permanezca quieto, con su rostro en el centro del círculo"
-        else:
-            message = action.capitalize()
-        return CameraGuide(title, message, "ok" if capturing else "adjust", progress, detail, debug, user_label)
-
     def show_result(self, capture: CaptureResult, title: str, lines: list[str], duration: float = 1.5) -> None:
         if capture.last_frame is None:
             return
@@ -486,11 +397,7 @@ class FaceEngine:
         deadline = time.monotonic() + duration
         try:
             while time.monotonic() < deadline:
-                state = "error" if any(word in lines[0] for word in ("NO ", "ERROR")) else "done"
-                message = RESULT_MESSAGES.get(lines[0], lines[0].capitalize())
-                user = lines[1].split(":", 1)[1].strip() if len(lines) > 1 and lines[1].startswith("Usuario:") else ""
-                guide = self._simple_guide(title, message, state, "", user)
-                key = window.show(capture.last_frame, [], lines, guide)
+                key = window.show(capture.last_frame, [], lines)
                 if key == 27:
                     break
         finally:
