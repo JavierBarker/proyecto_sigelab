@@ -1,6 +1,8 @@
 # Modelo de datos y diccionario
 
 Fuente ejecutable: `database/02_esquema.sql` y `database/05_facial.sql`.
+Diagrama exportado: `docs/diagramas/modelo-er.png` (regenerable con
+`java -Djava.awt.headless=true scripts/GenerarDiagramas.java`).
 El diagrama corresponde a las doce tablas del proyecto. Las relaciones no tienen
 borrado en cascada; en AuditoriaFacial, eliminar un usuario pone su referencia en NULL.
 

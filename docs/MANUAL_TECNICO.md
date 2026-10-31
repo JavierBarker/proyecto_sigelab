@@ -1,5 +1,13 @@
 # Manual técnico
 
+## Diagramas del sistema
+
+Todos los diagramas (flujos de login, préstamo, devolución y mantenimiento,
+máquina de estados del equipo, casos de uso y modelo entidad-relación) están en
+[`DIAGRAMAS.md`](DIAGRAMAS.md) con su explicación, y como imágenes PNG en
+`docs/diagramas/` listas para el entregable. Se regeneran con
+`java -Djava.awt.headless=true scripts/GenerarDiagramas.java`.
+
 ## Organización
 
 `Launcher` compone configuración, conexión, repositorio, autenticación y controlador.
