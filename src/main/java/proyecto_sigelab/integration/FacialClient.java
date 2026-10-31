@@ -12,7 +12,7 @@ public final class FacialClient {
   private final AppConfig config;
   private final ObjectMapper json = new ObjectMapper();
   private final HttpClient http =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build();
 
   public FacialClient(AppConfig config) {
     this.config = config;
