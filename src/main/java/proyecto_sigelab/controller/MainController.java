@@ -74,6 +74,13 @@ public final class MainController {
     p.button("Editar", () -> Tasks.guarded(view, () -> editCatalog(type, p, p.selected())));
     if (type == Catalogo.EQUIPO)
       p.button(
+          "Escanear QR",
+          () ->
+              new EquipoQrController(
+                      view, service, session, qr, () -> reload(p, () -> service.catalog(type)))
+                  .scan());
+    if (type == Catalogo.EQUIPO)
+      p.button(
           "Guardar QR",
           () ->
               Tasks.guarded(

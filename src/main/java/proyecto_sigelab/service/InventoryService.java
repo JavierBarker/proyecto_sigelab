@@ -261,4 +261,120 @@ public final class InventoryService {
           return maintenance ? db.maintenanceHistory(c, id) : db.equipmentHistory(c, id);
         });
   }
+
+  // ---------- Escaneo QR y comprobantes ----------
+
+  /** Busca un equipo por su código de inventario, en cualquier estado. */
+  public Equipo lookup(String code) {
+    String value = Rules.required(code, "Código", 30);
+    return db.transaction(
+        c -> {
+          authorize(c, false);
+          Equipo e = db.equipment(c, value);
+          if (e == null) throw new BusinessException("No existe un equipo con el código " + value + ".");
+          return e;
+        });
+  }
+
+  /** Código, nombre, tipo, laboratorio y estado del equipo (para la ventana y el comprobante). */
+  public List<Object> equipmentInfo(int id) {
+    return db.transaction(
+        c -> {
+          authorize(c, false);
+          Tabla t =
+              db.query(
+                  c,
+                  "SELECT e.CodigoInventario,e.Nombre,t.Nombre AS Tipo,l.Nombre AS Laboratorio,e.Estado"
+                      + " FROM dbo.Equipo e JOIN dbo.TipoEquipo t ON t.Id=e.TipoEquipoId"
+                      + " JOIN dbo.Laboratorio l ON l.Id=e.LaboratorioId WHERE e.Id=?",
+                  id);
+          if (t.filas().isEmpty()) throw new BusinessException("Equipo inexistente.");
+          return t.filas().get(0);
+        });
+  }
+
+  /** Historial unificado del equipo: préstamos, devoluciones, daños y mantenimientos. */
+  public Tabla timeline(int id) {
+    return db.transaction(
+        c -> {
+          authorize(c, false);
+          return db.query(
+              c,
+              "SELECT Fecha,Movimiento,Referencia,Detalle FROM ("
+                  + " SELECT p.FechaPrestamo AS Fecha,N'PRÉSTAMO' AS Movimiento,"
+                  + " CONCAT(N'Préstamo #',p.Id) AS Referencia,CONCAT(N'Solicitante: ',p.Solicitante) AS Detalle"
+                  + " FROM dbo.DetallePrestamo d JOIN dbo.Prestamo p ON p.Id=d.PrestamoId WHERE d.EquipoId=?"
+                  + " UNION ALL SELECT d.FechaDevolucion,CONCAT(N'DEVOLUCIÓN ',v.Condicion),"
+                  + " CONCAT(N'Préstamo #',p.Id),ISNULL(v.Observaciones,N'')"
+                  + " FROM dbo.DetallePrestamo d JOIN dbo.Prestamo p ON p.Id=d.PrestamoId"
+                  + " LEFT JOIN dbo.Devolucion v ON v.DetallePrestamoId=d.Id"
+                  + " WHERE d.EquipoId=? AND d.FechaDevolucion IS NOT NULL"
+                  + " UNION ALL SELECT a.Fecha,N'DAÑO REPORTADO',CONCAT(N'Equipo #',a.EntidadId),ISNULL(a.Detalle,N'')"
+                  + " FROM dbo.Auditoria a WHERE a.Accion='DANO_REPORTADO' AND a.Entidad='Equipo' AND a.EntidadId=?"
+                  + " UNION ALL SELECT m.FechaIngreso,CONCAT(N'MANTENIMIENTO ',m.Tipo),"
+                  + " CONCAT(N'Mantenimiento #',m.Id),m.Descripcion FROM dbo.Mantenimiento m WHERE m.EquipoId=?"
+                  + " UNION ALL SELECT m.FechaSalida,CONCAT(N'FIN MANTENIMIENTO ',m.Resultado),"
+                  + " CONCAT(N'Mantenimiento #',m.Id),ISNULL(m.Observaciones,N'')"
+                  + " FROM dbo.Mantenimiento m WHERE m.EquipoId=? AND m.FechaSalida IS NOT NULL"
+                  + ") h ORDER BY Fecha DESC",
+              id,
+              id,
+              id,
+              id,
+              id);
+        });
+  }
+
+  /** Préstamo pendiente del equipo: DetalleId, PrestamoId, Solicitante, FechaPrestamo, FechaEsperada. */
+  public List<Object> pendingLoan(int equipmentId) {
+    return db.transaction(
+        c -> {
+          authorize(c, false);
+          Tabla t =
+              db.query(
+                  c,
+                  "SELECT TOP (1) d.Id,d.PrestamoId,p.Solicitante,p.FechaPrestamo,p.FechaEsperada"
+                      + " FROM dbo.DetallePrestamo d JOIN dbo.Prestamo p ON p.Id=d.PrestamoId"
+                      + " WHERE d.EquipoId=? AND d.FechaDevolucion IS NULL ORDER BY d.Id DESC",
+                  equipmentId);
+          if (t.filas().isEmpty())
+            throw new BusinessException("El equipo no tiene un préstamo pendiente.");
+          return t.filas().get(0);
+        });
+  }
+
+  /** Id del mantenimiento abierto del equipo. */
+  public int openMaintenance(int equipmentId) {
+    return db.transaction(
+        c -> {
+          authorize(c, false);
+          Tabla t =
+              db.query(
+                  c,
+                  "SELECT TOP (1) Id FROM dbo.Mantenimiento WHERE EquipoId=? AND Estado='ABIERTO'"
+                      + " ORDER BY Id DESC",
+                  equipmentId);
+          if (t.filas().isEmpty())
+            throw new BusinessException("El equipo no tiene un mantenimiento abierto.");
+          return ((Number) t.filas().get(0).get(0)).intValue();
+        });
+  }
+
+  /** Marca como DANADO un equipo disponible y deja el motivo en la auditoría. */
+  public void reportDamage(int equipmentId, String description) {
+    String desc = Rules.required(description, "Descripción del daño", 1000);
+    db.transaction(
+        c -> {
+          authorize(c, false);
+          Equipo e = db.equipment(c, equipmentId, true);
+          if (e == null) throw new BusinessException("Equipo inexistente.");
+          if (e.estado() != EstadoEquipo.DISPONIBLE)
+            throw new BusinessException(
+                "Solo se reporta daño de un equipo DISPONIBLE. Si está prestado, regístrelo en la"
+                    + " devolución con condición DANADO.");
+          db.equipmentState(c, equipmentId, EstadoEquipo.DANADO);
+          db.audit(c, session.usuarioId(), "DANO_REPORTADO", "Equipo", equipmentId, desc);
+          return null;
+        });
+  }
 }
